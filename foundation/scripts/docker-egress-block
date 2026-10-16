@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Installed to /usr/local/sbin by 06-configure-firewall.sh.
+#
+# Containers on Skynet's "gateway" network must be on a normal (non-internal)
+# Docker network so the host can publish their ports. That also gives them
+# internet access. These rules take it away again: any NEW connection that
+# starts inside the network and leaves it is dropped. Replies to connections
+# made *to* the containers are untouched.
+#
+# The subnet must match networks.gateway in foundation/inference/compose.yaml.
+set -euo pipefail
+
+SUBNETS=(172.30.0.0/24)
+COMMENT="skynet-egress-block"
+
+remove() {
+  # Delete every rule carrying our comment (iptables -S prints them in -A form).
+  iptables -S DOCKER-USER 2>/dev/null | grep -- "--comment ${COMMENT}" \
+    | sed 's/^-A /-D /' | while read -r rule; do
+        # shellcheck disable=SC2086
+        iptables ${rule}
+      done
+}
+
+apply() {
+  iptables -N DOCKER-USER 2>/dev/null || true
+  remove
+  for s in "${SUBNETS[@]}"; do
+    iptables -I DOCKER-USER -s "${s}" ! -d "${s}" -m conntrack --ctstate NEW \
+      -m comment --comment "${COMMENT}" -j DROP
+  done
+}
+
+case "${1:-}" in
+  apply)  apply ;;
+  remove) remove ;;
+  *) echo "usage: $0 apply|remove" >&2; exit 2 ;;
+esac

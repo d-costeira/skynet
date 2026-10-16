@@ -1,0 +1,30 @@
+# vLLM flags shared by both proposals, with MTP speculative decoding OFF.
+# This is the house plan's choice (it believes MTP disables prefix caching).
+# Keep this file and mtp-on.yaml identical apart from speculative-config.
+# Keys are `vllm serve` flags without the leading dashes.
+
+served-model-name: qwen3.8-27b
+
+# Both GPUs, tensor parallel. No P2P on the stock GeForce driver, so vLLM's
+# custom all-reduce kernel (which needs P2P) is off and NCCL is used instead.
+tensor-parallel-size: 2
+disable-custom-all-reduce: true
+
+# Reuse the KV cache of a repeated prompt prefix (system prompt, entity list,
+# agent history). For Qwen3.8's hybrid layers vLLM v0.30 defaults
+# mamba-cache-mode to "align" when this is on; it's set explicitly so the
+# config says what it does.
+enable-prefix-caching: true
+mamba-cache-mode: align
+
+# Lets the gateway give one alias priority over the other (lower = first).
+scheduling-policy: priority
+
+max-num-seqs: 6
+max-num-batched-tokens: 4096
+
+# Thinking traces go to `reasoning_content`, tool calls are parsed out.
+# (qwen3_xml and qwen3_coder are aliases of the same parser in v0.30.)
+reasoning-parser: qwen3
+enable-auto-tool-choice: true
+tool-call-parser: qwen3_xml

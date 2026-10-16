@@ -1,0 +1,88 @@
+# Skynet shared inference layer: vLLM (both GPUs, TP=2) behind LiteLLM.
+# This is the part both proposals have in common. Direction-specific services
+# (Open WebUI/Caddy, or Whisper/Piper for Home Assistant) get added later.
+#
+#   cp .env.example .env    # then fill in the secrets
+#   docker compose up -d
+#
+# Nothing here is reachable from the LAN: vLLM is on an internal network and
+# LiteLLM is published on 127.0.0.1 only. Use an SSH tunnel to reach it from
+# another machine:  ssh -L 4000:127.0.0.1:4000 <you>@192.168.4.31
+name: skynet
+
+networks:
+  # vLLM <-> LiteLLM only. internal: no route to the internet or the LAN.
+  inference:
+    internal: true
+    ipam:
+      config: [{ subnet: 172.30.1.0/24 }]
+  # LiteLLM's published port. Must be non-internal for publishing to work, so
+  # new outbound connections from it are dropped by docker-egress-block
+  # (foundation/scripts/docker-egress-block). Keep the subnets in sync.
+  gateway:
+    ipam:
+      config: [{ subnet: 172.30.0.0/24 }]
+
+services:
+  vllm:
+    image: ${VLLM_IMAGE:?set VLLM_IMAGE in .env}
+    restart: unless-stopped
+    networks: [inference]
+    # NCCL stages inter-GPU traffic through shared memory (no P2P on GeForce).
+    # tmpfs: only uses RAM while actually filled.
+    shm_size: 16gb
+    ipc: private
+    environment:
+      VLLM_API_KEY: ${VLLM_API_KEY:?set VLLM_API_KEY in .env}
+      HF_HUB_OFFLINE: "1"
+      NCCL_P2P_DISABLE: "1"
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+    volumes:
+      - ${MODELS_DIR:-/srv/models}:/models:ro
+      - ./vllm-profiles:/profiles:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    # The image's entrypoint is `vllm serve`. The profile YAML holds the flags
+    # shared by both proposals plus the one setting being compared (MTP).
+    # The flags after it override the profile, so VRAM share and context
+    # length can be changed in .env without touching the profiles.
+    command:
+      - /models/${MODEL_DIR_NAME:-Qwen3.8-27B-AWQ-INT4}
+      - --config
+      - /profiles/${VLLM_PROFILE:-mtp-off}.yaml
+      - --gpu-memory-utilization
+      - "${GPU_MEMORY_UTILIZATION:-0.92}"
+      - --max-model-len
+      - "${MAX_MODEL_LEN:-262144}"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      # Weight loading + CUDA graph capture takes minutes on this box.
+      start_period: 15m
+
+  litellm:
+    image: ${LITELLM_IMAGE:?set LITELLM_IMAGE in .env}
+    restart: unless-stopped
+    networks: [inference, gateway]
+    ports:
+      - "127.0.0.1:4000:4000"
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY in .env}
+      VLLM_API_KEY: ${VLLM_API_KEY}
+      # Use the bundled model-price map instead of fetching it from GitHub
+      # at startup (the container has no internet anyway).
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+    volumes:
+      - ./litellm.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    depends_on:
+      vllm:
+        condition: service_healthy

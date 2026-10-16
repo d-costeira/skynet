@@ -1,0 +1,15 @@
+[Unit]
+Description=Set RTX 3090 power limits
+After=nvidia-persistenced.service
+Wants=nvidia-persistenced.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# GPU_POWER_LIMIT comes from here; edit it and run:
+#   sudo systemctl restart gpu-power-limit
+EnvironmentFile=/etc/default/gpu-power-limit
+ExecStart=/usr/bin/nvidia-smi -pl ${GPU_POWER_LIMIT}
+
+[Install]
+WantedBy=multi-user.target
