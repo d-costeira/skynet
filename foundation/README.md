@@ -42,18 +42,31 @@ These come from both plans (coding D8 / house D10):
 Models (about 21 GB) and Docker images (vLLM's alone is about 9 GB) go on the 1 TB SSD, not the 256 GB system disk.
 
 ```bash
-lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT,MODEL    # find the 1 TB disk, e.g. sdb
+lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT,MODEL    # find the 1 TB disk
+cat /etc/fstab                                # is it already listed (e.g. by the Ubuntu installer)?
 ```
 
-If it already has a filesystem with data you want, skip the `mkfs` line. **`mkfs` erases the disk.**
+Set `DEV` to the device that **holds the filesystem**:
+
+- If `lsblk` shows a partition under the disk (`sdb` → `sdb1`), it's the partition: `DEV=/dev/sdb1`.
+- If the filesystem sits on the whole disk (`sdb` shows `ext4` itself, no children), it's the disk: `DEV=/dev/sdb`.
+
+If `/etc/fstab` already has an entry for this disk (for example one the installer added for another mount point), edit that line to say `/srv` instead of adding a second one, or delete it first. Two entries for one disk, or an entry for a UUID that no longer exists, can stop Ubuntu from booting normally.
+
+If the disk already has a filesystem with data you want, skip the `mkfs` line. **`mkfs` erases the disk.**
 
 ```bash
-sudo mkfs.ext4 -L skynet-data /dev/sdX1        # ONLY if it's empty / you want it wiped
+DEV=/dev/sdb                                   # adjust, see above
+sudo mkfs.ext4 -L skynet-data "$DEV"           # ONLY if it's empty / you want it wiped
+uuid="$(sudo blkid -s UUID -o value "$DEV")"
+[ -n "$uuid" ] && echo "UUID=$uuid /srv ext4 defaults,noatime,nofail 0 2" | sudo tee -a /etc/fstab
 sudo mkdir -p /srv
-echo "UUID=$(sudo blkid -s UUID -o value /dev/sdX1) /srv ext4 defaults,noatime 0 2" | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload
 sudo mount -a && df -h /srv
 sudo install -d -o "$USER" /srv/models
 ```
+
+`nofail` lets the machine finish booting even if the SSD is missing or fails; `/srv` is simply absent until it's fixed. The `[ -n "$uuid" ]` guard stops a blank `UUID=` line from being written if `DEV` is wrong.
 
 ### Get this repo onto Skynet
 
