@@ -1,0 +1,47 @@
+# LiteLLM gateway: one model, two aliases. This is the pattern both proposals
+# share (coding plan: coder / guest-chat; house plan: house / sage). The names
+# here are neutral; the chosen direction renames or adds aliases later.
+#
+#   think: thinking on,  served first (priority 0)
+#   fast:  thinking off, served after `think` (priority 10), short replies
+#
+# Whether these extra_body fields really reach vLLM, and whether a client can
+# override them, is an open question in both proposals (coding U6 / house
+# U17). bench/check-gateway.sh tests it.
+
+model_list:
+  - model_name: think
+    litellm_params:
+      model: hosted_vllm/qwen3.8-27b
+      api_base: http://vllm:8000/v1
+      api_key: os.environ/VLLM_API_KEY
+      # Qwen3.8 model card, thinking mode.
+      temperature: 1.0
+      top_p: 0.95
+      presence_penalty: 0
+      extra_body:
+        priority: 0
+        top_k: 20
+        chat_template_kwargs: { enable_thinking: true }
+
+  - model_name: fast
+    litellm_params:
+      model: hosted_vllm/qwen3.8-27b
+      api_base: http://vllm:8000/v1
+      api_key: os.environ/VLLM_API_KEY
+      max_tokens: 1536
+      # Qwen3.8 model card, non-thinking mode.
+      temperature: 0.7
+      top_p: 0.8
+      presence_penalty: 1.5
+      extra_body:
+        priority: 10
+        top_k: 20
+        chat_template_kwargs: { enable_thinking: false }
+
+litellm_settings:
+  # Don't send usage telemetry (the container has no egress anyway).
+  telemetry: false
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

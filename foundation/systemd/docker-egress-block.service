@@ -1,0 +1,16 @@
+[Unit]
+Description=Block new outbound connections from Skynet's container networks
+# Docker (re)creates the DOCKER-USER chain on start but never flushes it, so
+# apply the rules after Docker is up.
+After=docker.service
+Requires=docker.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/docker-egress-block apply
+ExecStop=/usr/local/sbin/docker-egress-block remove
+
+[Install]
+WantedBy=multi-user.target
