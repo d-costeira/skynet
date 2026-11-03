@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Step 6: host security baseline.
 #   - SSH: keys only, no root login.
-#   - UFW: deny all inbound except SSH from the trusted LAN.
+#   - UFW: deny all inbound except SSH from SSH_ALLOWED_SUBNETS.
 #   - DOCKER-USER: containers can't open new outbound connections.
 #
 # Nothing in foundation/inference publishes a port on the LAN (LiteLLM is bound
@@ -16,23 +16,31 @@ log "Pre-flight checks (to avoid locking you out)"
 
 auth_keys="$(getent passwd "${user}" | cut -d: -f6)/.ssh/authorized_keys"
 if [[ ! -s "${auth_keys}" ]]; then
-  die "${auth_keys} is missing or empty. Add your SSH public key first (ssh-copy-id ${user}@${SKYNET_IP}), test a key login, then re-run."
+  die "${auth_keys} is missing or empty. Add your SSH public key first, test a key login, then re-run."
 fi
 echo "OK: ${user} has $(grep -c -E '^(ssh-|ecdsa-|sk-)' "${auth_keys}") SSH key(s)."
 
+read -r -a subnets <<< "${SSH_ALLOWED_SUBNETS}"
+[[ ${#subnets[@]} -gt 0 ]] || die "SSH_ALLOWED_SUBNETS is empty in foundation/skynet.conf."
+
 if [[ -n "${SSH_CLIENT:-}" ]]; then
   client_ip="${SSH_CLIENT%% *}"
-  if python3 -c "import ipaddress,sys; sys.exit(0 if ipaddress.ip_address('${client_ip}') in ipaddress.ip_network('${LAN_SUBNET}') else 1)"; then
-    echo "OK: your SSH session comes from ${client_ip}, inside ${LAN_SUBNET}."
+  if python3 - "${client_ip}" "${subnets[@]}" <<'PY'
+import ipaddress, sys
+ip = ipaddress.ip_address(sys.argv[1])
+sys.exit(0 if any(ip in ipaddress.ip_network(n) for n in sys.argv[2:]) else 1)
+PY
+  then
+    echo "OK: your SSH session comes from ${client_ip}, inside SSH_ALLOWED_SUBNETS (${SSH_ALLOWED_SUBNETS})."
   else
-    die "Your SSH session comes from ${client_ip}, which is OUTSIDE LAN_SUBNET=${LAN_SUBNET}. Fix LAN_SUBNET in foundation/skynet.conf first."
+    die "Your SSH session comes from ${client_ip}, which is OUTSIDE SSH_ALLOWED_SUBNETS (${SSH_ALLOWED_SUBNETS}). Add its subnet in foundation/skynet.conf first."
   fi
 fi
 
 echo
 echo "This will:"
 echo "  - disable SSH password logins and root login"
-echo "  - allow inbound SSH only from ${LAN_SUBNET}, deny all other inbound"
+echo "  - allow inbound SSH only from ${SSH_ALLOWED_SUBNETS}, deny all other inbound"
 echo "  - block containers on 172.30.0.0/24 from opening outbound connections"
 confirm "Apply?" || exit 1
 
@@ -51,7 +59,9 @@ apt-get install -y ufw
 ufw --force reset >/dev/null
 ufw default deny incoming
 ufw default allow outgoing
-ufw allow from "${LAN_SUBNET}" to any port 22 proto tcp comment 'SSH from trusted LAN'
+for subnet in "${subnets[@]}"; do
+  ufw allow from "${subnet}" to any port 22 proto tcp comment 'SSH from trusted network'
+done
 ufw --force enable
 ufw status verbose
 

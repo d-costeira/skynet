@@ -7,7 +7,7 @@
 #
 # Nothing here is reachable from the LAN: vLLM is on an internal network and
 # LiteLLM is published on 127.0.0.1 only. Use an SSH tunnel to reach it from
-# another machine:  ssh -L 4000:127.0.0.1:4000 <you>@192.168.4.31
+# another machine:  ssh -L 4000:127.0.0.1:4000 skynet@10.46.22.12
 name: skynet
 
 networks:

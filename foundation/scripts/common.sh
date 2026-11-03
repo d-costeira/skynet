@@ -23,6 +23,8 @@ require_ubuntu_2404() {
 }
 
 confirm() {
+  # ASSUME_YES=1 answers yes without asking (for non-interactive runs over ssh).
+  if [[ "${ASSUME_YES:-}" == "1" ]]; then echo "$1 [y/N] y (ASSUME_YES=1)"; return 0; fi
   local answer
   read -r -p "$1 [y/N] " answer
   [[ "${answer}" =~ ^[Yy]$ ]]
