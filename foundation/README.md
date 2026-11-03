@@ -37,35 +37,31 @@ These come from both plans (coding D8 / house D10):
 - Set both PCIe x16 slots to **Gen3** explicitly instead of Auto. Auto sometimes trains a link at a lower speed.
 - Optional: the 4.2–4.4 GHz CPU overclock. vLLM's scheduler is Python and runs on the CPU, so a faster CPU directly helps tokens per second on this box. Leave it for later if you'd rather keep things stock while testing.
 
-### Mount the 1 TB SSD at `/srv`
+### The 1 TB SSD at `/srv`
 
-Models (about 21 GB) and Docker images (vLLM's alone is about 9 GB) go on the 1 TB SSD, not the 256 GB system disk.
-
-```bash
-lsblk -o NAME,SIZE,FSTYPE,MOUNTPOINT,MODEL    # find the 1 TB disk, e.g. sdb
-```
-
-If it already has a filesystem with data you want, skip the `mkfs` line. **`mkfs` erases the disk.**
+Models (about 21 GB) and Docker images (vLLM's alone is about 9 GB) go on the 1 TB SSD, not the 256 GB system disk. On Skynet the Ubuntu installer formats it and mounts it at `/srv`. Check it, and create the models folder:
 
 ```bash
-sudo mkfs.ext4 -L skynet-data /dev/sdX1        # ONLY if it's empty / you want it wiped
-sudo mkdir -p /srv
-echo "UUID=$(sudo blkid -s UUID -o value /dev/sdX1) /srv ext4 defaults,noatime 0 2" | sudo tee -a /etc/fstab
-sudo mount -a && df -h /srv
+df -h /srv                                     # should show ~916G, not the root disk
 sudo install -d -o "$USER" /srv/models
 ```
 
 ### Get this repo onto Skynet
 
+From the workstation (GHOSTWHEEL has a `skynet` entry in its SSH config, so `ssh skynet` logs in as `skynet@10.46.22.12` with a key):
+
 ```bash
-sudo apt-get install -y git
+ssh skynet
+sudo apt-get update && sudo apt-get install -y git
 git clone https://github.com/d-costeira/skynet.git ~/skynet
 cd ~/skynet/foundation
 ```
 
 ### Check `skynet.conf`
 
-It has `SKYNET_IP=192.168.4.31` and **assumes** your LAN is `192.168.4.0/24` (`LAN_SUBNET`). The firewall step only allows SSH from that range. If your router hands out addresses outside it, change `LAN_SUBNET` first.
+It has `SKYNET_IP=10.46.22.12` and `SSH_ALLOWED_SUBNETS="10.46.22.0/24"`. The firewall step only allows SSH from those subnets, so if your workstation is on a different VLAN, add its subnet first. The script also refuses to run if your current SSH session comes from outside the list.
+
+Scripts that ask for confirmation (02, 06) can run unattended with `ASSUME_YES=1`, e.g. `sudo ASSUME_YES=1 scripts/06-configure-firewall.sh`.
 
 ---
 
@@ -118,10 +114,10 @@ The check at the end prints each card's PCIe link. **At idle the cards drop to a
 
 ### 6. Firewall and SSH hardening — `sudo scripts/06-configure-firewall.sh`
 
-Before changing anything, it checks that you have an SSH key installed and that your current SSH session comes from inside `LAN_SUBNET`, and asks for confirmation. Then:
+Before changing anything, it checks that you have an SSH key installed and that your current SSH session comes from inside `SSH_ALLOWED_SUBNETS`, and asks for confirmation. Then:
 
 - **SSH:** password login and root login are turned off (keys only).
-- **UFW:** all inbound traffic is denied except SSH from `LAN_SUBNET`. Nothing else on Skynet is reachable from the network yet: the inference stack is deliberately bound to `127.0.0.1`.
+- **UFW:** all inbound traffic is denied except SSH from `SSH_ALLOWED_SUBNETS`. Nothing else on Skynet is reachable from the network yet: the inference stack is deliberately bound to `127.0.0.1`.
 - **Container egress block** (`docker-egress-block.service`). Docker-published ports bypass UFW, because Docker writes its own iptables rules, and containers on a normal Docker network can reach the internet. This adds a rule to Docker's `DOCKER-USER` chain that drops any **new** outbound connection started by a container on the gateway network. Replies to connections made *to* the container still work. vLLM sits on an `internal` network and has no route out at all. Image pulls are done by the Docker daemon on the host, so they aren't affected.
 
 **Keep your SSH session open and test a fresh login from a second terminal before you log out.**
@@ -167,7 +163,7 @@ curl -s http://127.0.0.1:4000/v1/chat/completions \
 **From your workstation**, through an SSH tunnel (no port is opened on the LAN):
 
 ```bash
-ssh -L 4000:127.0.0.1:4000 <you>@192.168.4.31
+ssh -L 4000:127.0.0.1:4000 skynet
 # then use http://127.0.0.1:4000/v1 with the LiteLLM key, from any OpenAI-compatible client
 ```
 

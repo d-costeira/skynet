@@ -16,7 +16,7 @@ apt-get -y autoremove --purge
 
 log "Installing base tools"
 apt-get install -y --no-install-recommends \
-  ca-certificates curl gnupg2 git jq htop nvtop pciutils lm-sensors \
+  ca-certificates curl gnupg2 git jq python3 htop nvtop pciutils lm-sensors \
   unattended-upgrades
 
 log "Enabling automatic security updates"
